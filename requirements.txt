@@ -1,9 +1,10 @@
-
 streamlit
-scikit-learn
 pandas
 numpy
-shap
-fairlearn
+scikit-learn
 matplotlib
+seaborn
 joblib
+shap
+reportlab
+pyarrow
