@@ -85,8 +85,6 @@ Below is the complete architecture of the **AI Overseeing AI — Responsible AI 
 
 ### **Architecture Flowchart:**
 
-> Upload this image to your GitHub repository first,  
-> then reference it like this:
 
 ```md
 ![Technical Architecture](A_flowchart_diagram_depicts_the_technical_architec.png)
