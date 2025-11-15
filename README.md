@@ -79,12 +79,8 @@ Includes:
 
 ---
 
-## 🧩 Technical Architecture Diagram  
+## 🧩 Technical Architecture Diagram
 
-Below is the complete architecture of the **AI Overseeing AI — Responsible AI Evaluation System**.
+Below is the complete architecture of the **AI Overseeing AI — Responsible AI Evaluation System**:
 
-### **Architecture Flowchart:**
-
-
-```md
-![Technical Architecture](A_flowchart_diagram_depicts_the_technical_architec.png)
+![Technical Architecture](Technical%20Architecture.png)
