@@ -4,24 +4,25 @@ A Responsible AI system for **Model Training, Fairness Evaluation, and Explainab
 ---
 
 ## 🚀 Live Demo  
-🔗 **Try the App:** [https://your-streamlit-app-url.streamlit.app  ](https://aioverseeingai-vfqdwgumul23ufsf88hfwy.streamlit.app/)
-
+🔗 **Try the App:**  
+https://aioverseeingai-vfqdwgumul23ufsf88hfwy.streamlit.app/
 
 ---
 
 ## 📌 Overview  
 
-**AI Overseeing AI Dashboard** is a full-stack Responsible AI project that allows users to:  
+**AI Overseeing AI Dashboard** is a full-stack Responsible AI project that allows users to:
+
 - Train ML models with uploaded CSV data  
 - Generate accuracy, precision, recall, F1-score  
 - Display confusion matrix  
-- Perform **fairness analysis** by sensitive attributes  
+- Perform **fairness analysis** across sensitive attributes  
 - Generate **full PDF reports**  
 - Explain predictions using **SHAP values**  
 - Explore dataset insights and correlations  
 - Deploy seamlessly to Streamlit Cloud  
 
-This project ensures transparency, fairness, and explainability — essential components of modern Responsible AI systems.
+This project ensures **transparency, fairness, and explainability**, which are essential components of modern Responsible AI systems.
 
 ---
 
@@ -29,8 +30,8 @@ This project ensures transparency, fairness, and explainability — essential co
 
 ### 🔹 1. **Train a Machine Learning Model**  
 - Upload any CSV  
-- Automated preprocessing  
-- Automatically trains a model  
+- Automatic preprocessing  
+- Trains a classification model  
 - Displays evaluation metrics  
 - Saves the trained model as `.pkl`
 
@@ -76,4 +77,16 @@ Includes:
 | Deployment | Streamlit Cloud |
 | Codebase | Python 3.10+ |
 
+---
 
+## 🧩 Technical Architecture Diagram  
+
+Below is the complete architecture of the **AI Overseeing AI — Responsible AI Evaluation System**.
+
+### **Architecture Flowchart:**
+
+> Upload this image to your GitHub repository first,  
+> then reference it like this:
+
+```md
+![Technical Architecture](A_flowchart_diagram_depicts_the_technical_architec.png)
