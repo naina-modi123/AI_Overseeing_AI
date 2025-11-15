@@ -5,7 +5,13 @@ import joblib
 import matplotlib.pyplot as plt
 
 from model import train_model
-from evaluator import evaluate_fairness, explain_model_ui
+from evaluator import (
+    evaluate_fairness,
+    explain_model_ui,
+    generate_natural_language_explanation,
+    calculate_model_risk_score
+)
+
 from report_generator import generate_full_report
 
 
@@ -65,8 +71,10 @@ action = st.sidebar.selectbox(
         "📊 Train Model (CSV)",
         "🧪 Fairness Evaluation",
         "🔍 Explainability",
+        "🚦 Model Risk Score",
         "🧮 Predict on New Data",
         "📦 View Dataset"
+
     ]
 )
 
@@ -197,18 +205,81 @@ elif action == "🧪 Fairness Evaluation":
 
 
 # ------------------------------------------------------------
-# EXPLAINABILITY PAGE
+# EXPLAINABILITY PAGE (UPDATED WITH NLG)
 # ------------------------------------------------------------
 elif action == "🔍 Explainability":
     st.subheader("🔍 Model Explainability (SHAP)")
     try:
-        explain_model_ui()
+        result = explain_model_ui()
+
+        # result must return (shap_values, feature_names, row_data)
+        if result:
+            shap_values, feature_names, row_data = result
+
+            st.markdown("---")
+            st.write("### 🗣 Natural Language Explanation")
+
+            explanation = generate_natural_language_explanation(
+                shap_values, feature_names, row_data
+            )
+
+            st.markdown(explanation)
+
     except Exception as e:
         st.error(f"Explainability error: {e}")
 
 
 # ------------------------------------------------------------
-# PREDICTION PAGE (NEW)
+# 🚦 MODEL RISK SCORE PAGE
+# ------------------------------------------------------------
+elif action == "🚦 Model Risk Score":
+    st.subheader("🚦 Model Risk Assessment")
+
+    try:
+        model = joblib.load("trained_model.pkl")
+        df = pd.read_csv("loan_data.csv")
+    except:
+        st.error("Train a model first!")
+        st.stop()
+
+    st.info("Evaluating model risk... ⏳")
+
+    # Preparing SHAP for explainability risk
+    import shap
+    target_col = df.columns[-1]
+    X = df.drop(columns=[target_col])
+    
+    preprocessor = model.named_steps["preprocessor"]
+    classifier = model.named_steps["classifier"]
+    X_transformed = preprocessor.transform(X)
+
+    explainer = shap.TreeExplainer(classifier)
+    shap_values = explainer.shap_values(X_transformed)[0]
+
+    # Compute Risk
+    final_score, level, components = calculate_model_risk_score(
+        model, df, shap_values, X.columns
+    )
+
+    # Display
+    st.markdown(f"## {level}")
+    st.write(f"### Final Risk Score: **{final_score:.3f}**")
+
+    st.write("### 🔍 Risk Breakdown")
+    st.json(components)
+
+    # Explanation
+    st.write("### 🧠 Interpretation")
+    if "LOW" in level:
+        st.success("Model is safe and stable. Low bias & strong performance.")
+    elif "MEDIUM" in level:
+        st.warning("Some bias or instability exists. Review model behavior.")
+    else:
+        st.error("High risk detected! Model may be unfair or unreliable.")
+
+
+# ------------------------------------------------------------
+# PREDICTION PAGE 
 # ------------------------------------------------------------
 elif action == "🧮 Predict on New Data":
     st.subheader("🧮 Predict Using Trained Model")
