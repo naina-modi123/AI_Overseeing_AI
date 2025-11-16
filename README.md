@@ -84,3 +84,14 @@ Includes:
 Below is the complete architecture of the **AI Overseeing AI — Responsible AI Evaluation System**:
 
 ![Technical Architecture](Technical%20Architecture.png)
+
+
+## 🏁 How to Run Locally  
+
+```bash
+pip install -r requirements.txt
+streamlit run app.py
+```
+
+## 🤝 Contributing  
+Pull requests are welcome!
