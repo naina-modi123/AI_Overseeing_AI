@@ -4,38 +4,44 @@ import pandas as pd
 import numpy as np
 import joblib
 import matplotlib.pyplot as plt
-import seaborn as sns
+import shap
 
 
-# ============================================================
-# 1️⃣ FAIRNESS EVALUATION
-# ============================================================
+# =============================================================
+# 1️⃣ FAIRNESS EVALUATION  (works for numeric / encoded binary target)
+# =============================================================
 def evaluate_fairness():
     st.subheader("🧪 Fairness Evaluation Tool")
 
     try:
         df = pd.read_csv("loan_data.csv")
-    except:
-        st.error("⚠️ Dataset not found. Upload a CSV in 'Train Model' page first.")
+    except Exception:
+        st.error("⚠️ Dataset not found. Upload in Train Model page.")
         return
 
     st.write("### Select sensitive attribute")
-    sensitive = st.selectbox("Sensitive Attribute (e.g., Gender)", options=df.columns)
+    sensitive = st.selectbox("Sensitive Attribute", df.columns)
 
     st.write("### Select target column")
-    target = st.selectbox("Target Column", options=df.columns)
+    target = st.selectbox("Target Column", df.columns)
 
     if st.button("Run Fairness Analysis"):
         st.info("Computing fairness metrics...")
 
         try:
+            # Convert target to numeric if needed (safe)
+            y = df[target]
+            if y.dtype == object:
+                df[target] = y.astype("category").cat.codes
+
             group_stats = df.groupby(sensitive)[target].mean()
+
         except Exception as e:
             st.error(f"Fairness computation failed: {e}")
             return
 
-        st.write("### 📊 Average target rate per group")
-        st.dataframe(group_stats)
+        st.write("### 📊 Average target outcome per group")
+        st.dataframe(group_stats.reset_index())
 
         fig, ax = plt.subplots()
         group_stats.plot(kind="bar", color="#4C9AFF", ax=ax)
@@ -46,182 +52,217 @@ def evaluate_fairness():
         st.success("Fairness evaluation completed!")
 
 
-# ============================================================
-# 2️⃣ SHAP EXPLAINABILITY (RETURNS VALUES FOR NLG)
-# ============================================================
+# =============================================================
+# 2️⃣ SHAP EXPLAINABILITY (returns: row_shap_vector, feature_names, raw_row)
+# Robust handling for different shap output shapes / versions.
+# =============================================================
 def explain_model_ui():
-    import shap
-
     st.subheader("🔍 Model Explainability (SHAP)")
 
+    # load model
     try:
         model = joblib.load("trained_model.pkl")
-    except:
+    except Exception:
         st.error("⚠️ No trained model found. Train a model first.")
         return None
 
+    # load data
     try:
         df = pd.read_csv("loan_data.csv")
-    except:
+    except Exception:
         st.error("⚠️ Dataset 'loan_data.csv' not found.")
         return None
 
-    target_col = df.columns[-1]
-    X = df.drop(columns=[target_col])
-
-    preprocessor = model.named_steps["preprocessor"]
-    classifier = model.named_steps["classifier"]
+    target = df.columns[-1]
+    X = df.drop(columns=[target])
 
     try:
-        feature_names = preprocessor.get_feature_names_out()
-    except:
-        feature_names = X.columns
-
-    st.write("### Select a row to explain")
-    row_idx = st.number_input(
-        "Row index", min_value=0, max_value=len(X) - 1, value=0
-    )
-
-    st.info("Computing SHAP values... ⏳")
-
-    try:
-        X_transformed = preprocessor.transform(X)
-
-        explainer = shap.TreeExplainer(classifier)
-        shap_values = explainer.shap_values(X_transformed)
-    except Exception as e:
-        st.error(f"SHAP failed: {e}")
+        pre = model.named_steps["preprocessor"]
+        clf = model.named_steps["classifier"]
+    except Exception:
+        st.error("Model pipeline must contain 'preprocessor' and 'classifier' steps.")
         return None
 
-    pred = model.predict(X.iloc[[row_idx]])[0]
-    st.success(f"### 🔮 Prediction for row {row_idx}: **{pred}**")
-
-    st.write("### 📊 SHAP Summary Plot")
-    fig_sum = plt.figure(figsize=(8, 4))
-    shap.summary_plot(shap_values, X_transformed, feature_names=feature_names, show=False)
-    st.pyplot(fig_sum)
-
-    st.write("### 🌊 SHAP Waterfall Plot")
+    # get feature names (fallback to X.columns)
     try:
-        fig_wf = plt.figure(figsize=(8, 4))
-        waterfall_obj = shap.Explanation(
-            values=shap_values[pred][row_idx],
-            base_values=explainer.expected_value[pred],
-            data=X_transformed[row_idx],
-            feature_names=feature_names
+        feature_names = list(pre.get_feature_names_out())
+    except Exception:
+        feature_names = list(X.columns)
+
+    row_idx = st.number_input("Row index", min_value=0, max_value=max(0, len(X) - 1), value=0)
+    st.info("Computing SHAP values...")
+
+    # transform features for SHAP
+    try:
+        Xt = pre.transform(X)
+        if hasattr(Xt, "toarray"):
+            Xt = Xt.toarray()
+    except Exception as e:
+        st.error(f"Preprocessor transform failed: {e}")
+        return None
+
+    # compute shap values with TreeExplainer (works for tree models)
+    try:
+        explainer = shap.TreeExplainer(clf)
+        shap_values_raw = explainer.shap_values(Xt)
+    except Exception as e:
+        st.error(f"SHAP computation failed: {e}")
+        return None
+
+    # Normalize shap_values to a 2D array: (n_samples, n_features)
+    class_idx = 0  # which class we choose (for multiclass/binary choose positive/class 1 if available)
+    sv = None
+    try:
+        # list case: common for multiclass/tree SHAP
+        if isinstance(shap_values_raw, list):
+            # If binary/multiclass this is list[class][n_samples, n_features]
+            if len(shap_values_raw) > 1:
+                class_idx = 1 if len(shap_values_raw) > 1 else 0
+                sv = np.array(shap_values_raw[class_idx])
+            else:
+                sv = np.array(shap_values_raw[0])
+
+        # numpy array
+        elif isinstance(shap_values_raw, np.ndarray):
+            # possible shapes:
+            # - (n_samples, n_features) -> fine
+            # - (n_outputs, n_samples, n_features) -> choose class index 1 if exists
+            # - (n_samples, n_features, n_outputs) -> choose last axis index 1 if exists
+            if shap_values_raw.ndim == 2:
+                sv = shap_values_raw
+            elif shap_values_raw.ndim == 3:
+                a, b, c = shap_values_raw.shape
+                # if first dim equals n_samples -> (n_samples, n_features, n_outputs)
+                if a == Xt.shape[0]:
+                    # choose output index 1 if possible else 0
+                    out_idx = 1 if c > 1 else 0
+                    sv = shap_values_raw[:, :, out_idx]
+                    class_idx = out_idx
+                # else if second dim equals n_samples -> (n_outputs, n_samples, n_features)
+                elif b == Xt.shape[0]:
+                    cls = 1 if a > 1 else 0
+                    sv = shap_values_raw[cls]
+                    class_idx = cls
+                else:
+                    # fallback: try to reshape to (n_samples, n_features)
+                    try:
+                        sv = shap_values_raw.reshape(Xt.shape[0], -1)
+                    except Exception:
+                        sv = np.array(shap_values_raw)
+            else:
+                # unexpected dims -> try to coerce
+                sv = shap_values_raw.reshape(Xt.shape[0], -1)
+        else:
+            sv = np.array(shap_values_raw)
+
+    except Exception as e:
+        st.error(f"Failed to normalize SHAP output: {e}")
+        return None
+
+    # ensure sv is 2D and matches X shape
+    try:
+        sv = np.asarray(sv)
+        if sv.ndim != 2 or sv.shape[0] != Xt.shape[0]:
+            st.warning(f"SHAP output has unexpected shape {sv.shape}; attempting transpose/reshape.")
+            # try transpose if that fixes it
+            if sv.ndim == 2 and sv.shape[1] == Xt.shape[0]:
+                sv = sv.T
+    except Exception as e:
+        st.error(f"SHAP postprocessing failed: {e}")
+        return None
+
+    # prediction for the selected row (show to user)
+    try:
+        pred = model.predict(X.iloc[[row_idx]])[0]
+        st.success(f"### 🔮 Prediction for row {row_idx}: **{pred}**")
+    except Exception as e:
+        st.warning(f"Could not compute model prediction for row: {e}")
+
+    # SHAP summary plot
+    try:
+        fig = plt.figure(figsize=(8, 4))
+        shap.summary_plot(sv, Xt, feature_names=feature_names, show=False)
+        st.pyplot(fig)
+    except Exception as e:
+        st.warning(f"SHAP summary plot not available: {e}")
+
+    # Waterfall plot: ensure we pass a 1D explanation vector
+    try:
+        sv_row = sv[row_idx]
+
+        if sv_row.ndim != 1:
+            sv_row = np.ravel(sv_row)
+
+        # pick base value matching class_idx
+        base_val = explainer.expected_value
+        try:
+            # expected_value might be list/array for multiclass
+            if isinstance(base_val, (list, tuple, np.ndarray)):
+                if len(base_val) > class_idx:
+                    base_val = base_val[class_idx]
+                else:
+                    base_val = base_val[0]
+        except Exception:
+            pass
+
+        explanation = shap.Explanation(
+            values=sv_row,
+            base_values=base_val,
+            data=Xt[row_idx],
+            feature_names=feature_names,
         )
-        shap.plots.waterfall(waterfall_obj, show=False)
-        st.pyplot(fig_wf)
+
+        fig_w = plt.figure(figsize=(8, 4))
+        shap.plots.waterfall(explanation, show=False)
+        st.pyplot(fig_w)
+
     except Exception as e:
         st.warning(f"Waterfall plot not supported: {e}")
 
-    st.write("### ⚡ SHAP Force Plot")
+    # Return a 1D row shap vector + feature_names + original row for NLG
     try:
-        force = shap.force_plot(
-            explainer.expected_value[pred],
-            shap_values[pred][row_idx],
-            X_transformed[row_idx],
-            matplotlib=False
-        )
-        st.components.v1.html(force.html(), height=300)
-    except:
-        st.warning("Force plot is not supported.")
-
-    # ⭐ RETURN VALUES FOR NLG
-    return shap_values[pred][row_idx], feature_names, X.iloc[row_idx].values
+        row_shap = np.ravel(sv[row_idx])
+        return row_shap, feature_names, X.iloc[row_idx].values
+    except Exception:
+        return None
 
 
 # ============================================================
-# 3️⃣ NATURAL LANGUAGE EXPLANATION
+# 3️⃣ NATURAL LANGUAGE EXPLANATION (NLG)
 # ============================================================
 def generate_natural_language_explanation(shap_values, feature_names, row_data):
-    shap_abs = [abs(val) for val in shap_values]
-    top_indices = sorted(range(len(shap_abs)), key=lambda i: shap_abs[i], reverse=True)[:3]
+    """
+    shap_values: 1D array for the selected row
+    feature_names: list-like of feature names (length == len(shap_values))
+    row_data: raw row values (pandas Series or numpy array)
+    """
 
-    explanation_parts = []
+    if shap_values is None:
+        return "No SHAP values available to generate explanation."
 
-    for idx in top_indices:
-        feature = feature_names[idx]
-        value = row_data[idx]
-        impact = shap_values[idx]
+    shap_vals = np.asarray(shap_values)
+    # safety: ensure lengths match
+    N = len(shap_vals)
+    fnames = list(feature_names)[:N]
+    row_vals = list(row_data)[:N]
 
-        if impact > 0:
-            explanation_parts.append(
-                f"- **{feature}** increased the prediction because its value ({value}) had a positive influence."
-            )
-        else:
-            explanation_parts.append(
-                f"- **{feature}** decreased the prediction because its value ({value}) had a negative influence."
-            )
+    # top-k by absolute importance
+    top_k = 3
+    idxs = sorted(range(N), key=lambda i: abs(shap_vals[i]), reverse=True)[:top_k]
+
+    parts = []
+    for i in idxs:
+        fname = fnames[i] if i < len(fnames) else f"feature_{i}"
+        fval = row_vals[i] if i < len(row_vals) else "N/A"
+        impact = float(shap_vals[i])
+        direction = "increased" if impact > 0 else "decreased"
+        parts.append(f"- **{fname}** ({fval}) {direction} the prediction (contribution ≈ {impact:.3f}).")
 
     final_text = (
-        "### 🗣️ Natural Language Explanation\n"
-        "Based on SHAP analysis, the model made this prediction because:\n\n"
-        + "\n".join(explanation_parts)
-        + "\n\nThese features had the strongest impact."
+        "### 🗣️ Natural Language Explanation\n\n"
+        "The model's prediction was influenced most strongly by the following features:\n\n"
+        + "\n".join(parts)
+        + "\n\nThese are the top contributors according to SHAP."
     )
 
     return final_text
-
-
-# ============================================================
-# 4️⃣ MODEL RISK SCORING (UPDATED & FIXED)
-# ============================================================
-def calculate_model_risk_score(model, df, shap_values, feature_names):
-
-    risk_components = {}
-
-    # 1️⃣ Accuracy Risk
-    target_col = df.columns[-1]
-    X = df.drop(columns=[target_col])
-    y = df[target_col]
-
-    # Fix: Encode y if strings ('Y','N','Yes','No')
-    if y.dtype == object:
-        unique_vals = list(y.unique())
-        mapping = {unique_vals[i]: i for i in range(len(unique_vals))}
-        y = y.map(mapping)
-
-    acc = model.score(X, y)
-    risk_components["accuracy"] = 1 - acc
-
-    # 2️⃣ Fairness Risk
-    fairness_risk = 0
-    for col in df.columns:
-        if df[col].dtype != object and df[col].nunique() > 2:
-            continue
-        try:
-            rates = df.groupby(col)[target_col].mean()
-            diff = abs(rates.max() - rates.min())
-            fairness_risk = max(fairness_risk, diff)
-        except:
-            pass
-    risk_components["fairness"] = fairness_risk
-
-    # 3️⃣ Explainability Risk
-    shap_mean = np.mean([abs(s) for s in shap_values])
-    explain_risk = 1 / (1 + shap_mean)
-    risk_components["explainability"] = explain_risk
-
-    # 4️⃣ Class Imbalance Risk
-    imbalance = df[target_col].value_counts(normalize=True).max()
-    risk_components["imbalance"] = imbalance - 0.5
-
-    # ⭐ FINAL SCORE
-    final_score = (
-        0.35 * risk_components["fairness"] +
-        0.30 * risk_components["accuracy"] +
-        0.20 * risk_components["explainability"] +
-        0.15 * risk_components["imbalance"]
-    )
-
-    final_score = min(max(final_score, 0), 1)
-
-    if final_score <= 0.33:
-        level = "🟢 LOW RISK"
-    elif final_score <= 0.66:
-        level = "🟡 MEDIUM RISK"
-    else:
-        level = "🔴 HIGH RISK"
-
-    return final_score, level, risk_components
